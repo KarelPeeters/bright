@@ -3,12 +3,13 @@ use std::process::Command;
 use ddc::Ddc;
 use ddc_winapi::Monitor;
 use clap::Clap;
+use std::num::ParseIntError;
 
 
 #[derive(Clap)]
 struct Opts {
-    internal: u8,
-    external: Option<u8>,
+    internal: String,
+    external: Option<String>,
 }
 
 fn find_guid<'a>(string: &'a str, query: &str) -> Option<&'a str> {
@@ -47,18 +48,20 @@ fn set_brightness(internal: u8, external: u8) {
     Command::new("powercfg")
         .args(&["-SetDcValueIndex", &scheme_guid, &subgroup_guid, &setting_guid, &value])
         .output()
-        .expect("Failure setting AC brigtness value");
+        .expect("Failure setting AC brightness value");
 
     Command::new("powercfg")
         .args(&["-SetAcValueIndex", &scheme_guid, &subgroup_guid, &setting_guid, &value])
         .output()
-        .expect("Failure setting AC brigtness value");
+        .expect("Failure setting AC brightness value");
 
     let monitors = Monitor::enumerate().unwrap();
 
     for mut mon in monitors {
-        println!("{:?}", mon.set_vcp_feature(0x10, external as u16));
-        println!("{:?}", mon.save_current_settings());
+        //ignore errors
+        //TODO call the correct functions instead of calling the wrong one and then ignoring the error
+        let _ = mon.set_vcp_feature(0x10, external as u16);
+        let _ = mon.save_current_settings();
     }
 
     Command::new("powercfg")
@@ -67,14 +70,35 @@ fn set_brightness(internal: u8, external: u8) {
         .expect("failed to apply updated power scheme");
 }
 
+fn parse_brightness_string(s: &str) -> Result<u8, ParseIntError> {
+    let value = s.parse::<u8>()?;
+
+    if s.len() == 1 {
+        Ok(value * 10)
+    } else {
+        Ok(value)
+    }
+}
+
+fn main_inner(opts: Opts) -> Result<(), ParseIntError> {
+    let internal = parse_brightness_string(&opts.internal)?;
+    let external = opts.external.as_ref().unwrap_or(&opts.internal);
+    let external = parse_brightness_string(&external)?;
+
+    if internal <= 100 && external <= 100 {
+        println!("Internal: {}, External: {}", internal, external);
+        set_brightness(internal, external);
+    } else {
+        eprintln!("Brightness must be <= 100");
+    }
+
+    Ok(())
+}
+
 fn main() {
     let opts: Opts = Opts::parse();
 
-    let external = opts.external.unwrap_or(opts.internal);
-
-    if opts.internal <= 100 && external <= 100 {
-        set_brightness(opts.internal, external);
-    }else {
-        eprintln!("Brightness must be <= 100")
+    if let Err(err) = main_inner(opts) {
+        eprintln!("Error: {}", err);
     }
 }

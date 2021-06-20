@@ -24,9 +24,8 @@ fn find_guid<'a>(string: &'a str, query: &str) -> Option<&'a str> {
     })
 }
 
-fn set_brightness(internal: u8, external: u8) {
-    assert!(internal <= 100);
-    assert!(external <= 100);
+fn set_internal_brightness(brightness: u8) {
+    assert!(brightness <= 100);
 
     //powercfg
     let power_query_output =
@@ -43,31 +42,35 @@ fn set_brightness(internal: u8, external: u8) {
     let subgroup_guid = find_guid(power_query, "(Display)").unwrap();
     let setting_guid = find_guid(power_query, "(Display brightness)").unwrap();
 
-    let value = internal.to_string();
+    let brightness_str = brightness.to_string();
 
     Command::new("powercfg")
-        .args(&["-SetDcValueIndex", &scheme_guid, &subgroup_guid, &setting_guid, &value])
+        .args(&["-SetDcValueIndex", &scheme_guid, &subgroup_guid, &setting_guid, &brightness_str])
         .output()
         .expect("Failure setting AC brightness value");
 
     Command::new("powercfg")
-        .args(&["-SetAcValueIndex", &scheme_guid, &subgroup_guid, &setting_guid, &value])
+        .args(&["-SetAcValueIndex", &scheme_guid, &subgroup_guid, &setting_guid, &brightness_str])
         .output()
         .expect("Failure setting AC brightness value");
+
+    Command::new("powercfg")
+        .args(&["-S", &scheme_guid])
+        .output()
+        .expect("failed to apply updated power scheme");
+}
+
+fn set_external_brightness(brightness: u8) {
+    assert!(brightness <= 100);
 
     let monitors = Monitor::enumerate().unwrap();
 
     for mut mon in monitors {
         //ignore errors
         //TODO call the correct functions instead of calling the wrong one and then ignoring the error
-        let _ = mon.set_vcp_feature(0x10, external as u16);
+        let _ = mon.set_vcp_feature(0x10, brightness as u16);
         let _ = mon.save_current_settings();
     }
-
-    Command::new("powercfg")
-        .args(&["-S", &scheme_guid])
-        .output()
-        .expect("failed to apply updated power scheme");
 }
 
 fn parse_brightness_string(s: &str) -> Result<u8, ParseIntError> {
@@ -87,7 +90,14 @@ fn main_inner(opts: Opts) -> Result<(), ParseIntError> {
 
     if internal <= 100 && external <= 100 {
         println!("Internal: {}, External: {}", internal, external);
-        set_brightness(internal, external);
+
+        //set internal brightness twice with different values, otherwise it doesn't reliably update
+        let internal_other = if internal == 0 { 1 } else { internal - 1 };
+        set_internal_brightness(internal_other);
+        set_internal_brightness(internal);
+
+        //external brightness seems to always update
+        set_external_brightness(external);
     } else {
         eprintln!("Brightness must be <= 100");
     }
